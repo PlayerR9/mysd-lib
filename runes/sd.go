@@ -1,0 +1,362 @@
+package runes
+
+import (
+	"slices"
+
+	"github.com/PlayerR9/mygo-lib/common"
+	"github.com/PlayerR9/mysd-lib/sd"
+)
+
+// runesT is for private use only.
+type runesT struct{}
+
+// SD is the namespace for SD-like functions.
+var SD runesT
+
+func init() {
+	SD = runesT{}
+}
+
+type indicesOfFunc struct {
+	err error
+	sep rune
+}
+
+func (f indicesOfFunc) Call(slice []rune) []uint {
+	lenSlice := uint(len(slice))
+	if lenSlice == 0 {
+		return nil
+	}
+
+	var count uint
+
+	for i := uint(0); i < lenSlice; i++ {
+		if slice[i] == f.sep {
+			continue
+		}
+
+		count++
+	}
+
+	if count == 0 {
+		return nil
+	}
+
+	indices := make([]uint, 0, count)
+	var lenIndices uint
+
+	for i := uint(0); i < lenSlice && lenIndices < count; i++ {
+		if slice[i] != f.sep {
+			continue
+		}
+
+		indices = append(indices, i)
+		lenIndices++
+	}
+
+	return indices
+}
+
+func (f indicesOfFunc) GetError() error {
+	return f.err
+}
+
+func (f indicesOfFunc) HasError() bool {
+	return f.err != nil
+}
+
+// IndicesOf is the SD version of IndicesOf that, given a separator rune, returns a function that
+// returns the indices of the separator in the given slice of runes.
+//
+// Parameters:
+//   - sep: The separator.
+//
+// Returns:
+//   - sd.Func[[]rune, []uint]: The function that returns the indices. Never returns nil.
+func (runesT) IndicesOf(sep rune) sd.Func[[]rune, []uint] {
+	return &indicesOfFunc{
+		sep: sep,
+		err: nil,
+	}
+}
+
+type repeatFunc struct {
+	err   error
+	count uint
+}
+
+func (f *repeatFunc) Call(char rune) []rune {
+	slice := make([]rune, 0, f.count)
+
+	for i := uint(0); i < f.count; i++ {
+		slice = append(slice, char)
+	}
+
+	return slice
+}
+
+func (f repeatFunc) GetError() error {
+	return f.err
+}
+
+func (f repeatFunc) HasError() bool {
+	return f.err != nil
+}
+
+// Repeat is the SD version of Repeat that, given a count, returns a function that returns a slice of
+// runes that are repeated a specified number of times.
+//
+// Parameters:
+//   - count: The number of times to repeat the character.
+//
+// Returns:
+//   - sd.Func[rune, []rune]: The function that returns a slice of runes. Never returns nil.
+//
+// If count is 0, it creates a no-op function. Regardless of the count, the function never
+// errors.
+func (runesT) Repeat(count uint) sd.Func[rune, []rune] {
+	if count == 0 {
+		return sd.NewNoopFunc[rune, []rune]()
+	}
+
+	return &repeatFunc{
+		count: count,
+		err:   nil,
+	}
+}
+
+type insertFunc struct {
+	err  error
+	char rune
+	s    []rune
+	lenS uint
+}
+
+func (f insertFunc) Call(i uint) []rune {
+	if f.lenS < i {
+		f.s = append(f.s, make([]rune, i-f.lenS)...)
+	}
+
+	res := make([]rune, f.lenS+1)
+	copy(res, f.s[:i])
+	res[i] = f.char
+	copy(res[i+1:], f.s[i:])
+
+	return res
+}
+
+func (f insertFunc) GetError() error {
+	return f.err
+}
+
+func (f insertFunc) HasError() bool {
+	return f.err != nil
+}
+
+// Insert is the SD version of Insert that, given a slice of runes, an index, and a rune, inserts the rune
+// at the given index in the slice.
+//
+// Parameters:
+//   - s: The slice to modify.
+//
+// Returns:
+//   - func(char rune) sd.Func[uint, []rune]: The function that inserts the rune at the given index. Never returns nil.
+func (runesT) Insert(s []rune) func(char rune) sd.Func[uint, []rune] {
+	lenS := uint(len(s))
+
+	fn := func(char rune) sd.Func[uint, []rune] {
+		return &insertFunc{
+			char: char,
+			s:    s,
+			lenS: lenS,
+		}
+	}
+
+	return fn
+}
+
+type insertManyFunc struct {
+	err      error
+	chars    []rune
+	lenChars uint
+	s        []rune
+	lenS     uint
+}
+
+func (f insertManyFunc) Call(i uint) []rune {
+	if f.lenS < i {
+		f.s = append(f.s, make([]rune, i-f.lenS)...)
+	}
+
+	res := make([]rune, f.lenS+f.lenChars)
+	copy(res, f.s[:i])
+	copy(res[i:], f.chars)
+	copy(res[i+f.lenChars:], f.s[i:])
+
+	return res
+}
+
+func (f insertManyFunc) GetError() error {
+	return f.err
+}
+
+func (f insertManyFunc) HasError() bool {
+	return f.err != nil
+}
+
+// InsertMany is the SD version of InsertMany that, given a slice of runes and a
+// variable number of runes, inserts the runes at the given index in the slice.
+//
+// Parameters:
+//   - s: The slice to modify.
+//
+// Returns:
+//   - func(chars ...rune) func(i uint) []rune: The function that inserts the runes at the given index. Never returns nil.
+func (runesT) InsertMany(s []rune) func(chars ...rune) sd.Func[uint, []rune] {
+	lenS := uint(len(s))
+
+	fn := func(chars ...rune) sd.Func[uint, []rune] {
+		lenChars := uint(len(chars))
+
+		if lenChars == 0 {
+			return sd.NewFunc(func(err *error, i uint) []rune {
+				return s
+			})
+		} else {
+			return &insertManyFunc{
+				chars:    chars,
+				lenChars: lenChars,
+				s:        s,
+				lenS:     lenS,
+			}
+		}
+	}
+
+	return fn
+}
+
+type deleteFunc struct {
+	err error
+	s   []rune
+}
+
+func (f deleteFunc) Call(i uint) []rune {
+	lenS := uint(len(f.s))
+	if lenS == 0 || i >= lenS {
+		return nil
+	}
+
+	for j := i; j < lenS-1; j++ {
+		f.s[j] = f.s[j+1]
+	}
+
+	if lenS-1 == 0 {
+		clear(f.s)
+		f.s = nil
+	} else {
+		f.s = f.s[:lenS-1]
+		clear(f.s[lenS-1:])
+	}
+
+	return f.s
+}
+
+func (f deleteFunc) GetError() error {
+	return f.err
+}
+
+func (f deleteFunc) HasError() bool {
+	return f.err != nil
+}
+
+// Delete is the SD version of Delete that, given an index, returns a function that deletes the rune
+// at the given index in the slice.
+//
+// Parameters:
+//   - s: The slice to modify.
+//
+// Returns:
+//   - func(uint): The function that deletes the rune. Never returns nil.
+func (runesT) Delete(s []rune) sd.Func[uint, []rune] {
+	return &deleteFunc{
+		s: s,
+	}
+}
+
+func (runesT) DeleteBetween(s []rune, i, j uint) []rune {
+	fn := SD.Delete(s)
+
+	for k := i; k < j; k++ {
+		s = fn.Call(k)
+	}
+
+	return s
+}
+
+// normalizeTabs replaces all tabs in chars with repl.
+//
+// The function has no side effects other than modifying chars.
+func (runesT) normalizeTabs(repl []rune) func(chars *[]rune) {
+	offset := uint(len(repl) - 1)
+
+	fn := func(chars *[]rune) {
+		fn := SD.IndicesOf('\t')
+
+		indices := fn.Call(*chars)
+		if len(indices) == 0 {
+			return
+		}
+
+		var delta uint
+
+		for _, idx := range indices {
+			idx += delta
+
+			_ = SD.Delete(chars)(idx)
+
+			*chars = slices.Insert(*chars, idx, repl...)
+
+			delta += offset
+		}
+	}
+
+	return fn
+}
+
+// Normalize is the SD version of Normalize that, given a tab_size, returns a function that
+// returns a function that normalizes the runes in chars by replacing all "\r\n" with "\n" and
+// all "\t" with the appropriate number of spaces depending on tab_size.
+//
+// Parameters:
+//   - tab_size: The size of the tab stop.
+//
+// Returns:
+//   - func([]rune) error: The function that returns an error. Never returns nil.
+func (runesT) Normalize(tab_size uint) func(chars *[]rune) error {
+	if tab_size == 0 {
+		return func(chars *[]rune) error {
+			return common.NewErrBadParam("tab_size", "must be positive")
+		}
+	}
+
+	repl_fn := SD.Repeat(tab_size)
+
+	repl := repl_fn.Call(' ')
+
+	fn := func(chars *[]rune) error {
+		if chars == nil || len(*chars) == 0 {
+			return nil
+		}
+
+		err := normalizeNewlines(chars)
+		if err != nil {
+			return err
+		}
+
+		normalizeTabs(chars, repl)
+
+		return nil
+	}
+
+	return fn
+}
