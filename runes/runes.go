@@ -4,7 +4,7 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"github.com/PlayerR9/mygo-lib/common"
+	"github.com/PlayerR9/mysd-lib/common"
 )
 
 // BytesToUtf8 converts a byte slice to a slice of runes.
