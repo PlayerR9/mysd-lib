@@ -3,6 +3,7 @@ package listlike
 import (
 	"errors"
 	"fmt"
+	"iter"
 )
 
 type SizeFunc struct {
@@ -75,49 +76,118 @@ func (f SizeFunc) Result() uint {
 	return f.result
 }
 
-type Aut interface {
+type Aut[O any] interface {
 	HasError() bool
 	GetError() error
 	Call(arg any) bool
 	Reset()
+	Result() O
 }
 
 var (
-	ErrNoAutomaton error
+	ErrNoAutomaton      error
+	ErrBadlyImplemented error
 )
 
 func init() {
 	ErrNoAutomaton = errors.New("no automaton was provided")
+	ErrBadlyImplemented = errors.New("automaton is implemented incorrectly")
 }
 
-func ERROR(aut Aut) error {
+// ERROR checks if the given automaton has an error and returns it.
+//
+// Parameters:
+//   - aut: The automaton to check for an error.
+//
+// Returns:
+//   - error: The error associated with the automaton if it has one, or nil if there is no error.
+//
+// Panics:
+//   - ErrNoAutomaton: If the provided automaton is nil.
+func ERROR[O any](aut Aut[O]) error {
 	if aut == nil {
-		return ErrNoAutomaton
-	} else if !aut.HasError() {
+		panic(ErrNoAutomaton)
+	}
+
+	if !aut.HasError() {
 		return nil
 	} else {
 		return aut.GetError()
 	}
 }
 
-func CALL[O any](aut interface {
-	Result() O
+// TRY calls the given automaton with the given argument and returns its result if there is no error.
+// If there is an error, it calls the given error handler with the error and returns its result.
+// If the error handler is nil, it will panic with the error.
+//
+// Parameters:
+//   - aut: The automaton to call.
+//   - arg: The argument to pass to the automaton.
+//   - handle: The error handler to call if there is an error.
+//
+// Returns:
+//   - O: The result of either the automaton or the error handler.
+//
+// Panics:
+//   - ErrNoAutomaton: If the provided automaton is nil.
+//   - error: If there is an error and the error handler is nil.
+func TRY[O any](aut Aut[O], arg any, handle func(err error) O) O {
+	if aut == nil {
+		panic(ErrNoAutomaton)
+	}
 
-	Aut
-}, arg any) O {
+	_ = aut.Call(arg)
+
+	if !aut.HasError() {
+		return aut.Result()
+	}
+
+	err := aut.GetError()
+
+	if handle == nil {
+		panic(err)
+	}
+
+	return handle(err)
+}
+
+// CALL executes the given automaton with the provided argument and returns its result.
+// If the automaton reaches a terminal state, it resets and tries again. If the automaton
+// is implemented incorrectly, it panics.
+//
+// Parameters:
+//   - aut: The automaton to execute.
+//   - arg: The argument to pass to the automaton.
+//
+// Returns:
+//   - O: The result of the automaton execution.
+//
+// Panics:
+//   - ErrNoAutomaton: If the provided automaton is nil.
+//   - ErrBadlyImplemented: If the automaton reaches a terminal state on the second call.
+//   - error: If the automaton has an error.
+func CALL[O any](aut Aut[O], arg any) O {
 	if aut == nil {
 		panic(ErrNoAutomaton)
 	}
 	defer aut.Reset()
 
-	ok := aut.Call(arg)
-	if ok {
-		aut.Reset()
-
-		ok = aut.Call(arg)
-		if !ok {
-			panic(errors.New("automaton is implemented incorrectly"))
+	isDone := aut.Call(arg)
+	if !isDone {
+		// Successfully called the automaton.
+		if aut.HasError() {
+			panic(aut.GetError())
 		}
+
+		return aut.Result()
+	}
+
+	// The automaton is in a terminal state; try to recall it.
+	aut.Reset()
+
+	isDone = aut.Call(arg)
+	if isDone {
+		panic(ErrBadlyImplemented)
 	}
 
 	if aut.HasError() {
@@ -127,35 +197,34 @@ func CALL[O any](aut interface {
 	return aut.Result()
 }
 
-func FOR(f interface {
-	Result() uint
-
-	Aut
-}, arg any) uint {
-	if f == nil {
-		return 0, ErrNoAutomaton
+func EACH[O any](aut Aut[O], arg any) iter.Seq[O] {
+	if aut == nil {
+		panic(ErrNoAutomaton)
 	}
-	defer f.Reset()
 
-	isDone := f.Call(arg)
-	if isDone {
-		f.Reset()
+	return func(yield func(O) bool) {
+		defer aut.Reset()
 
-		isDone = f.Call(arg)
-		if !isDone {
-			panic(errors.New("automaton is implemented incorrectly"))
+		var isDone bool
+
+		for !isDone {
+			isDone = aut.Call(arg)
+
+			if aut.HasError() {
+				panic(aut.GetError())
+			}
+
+			if !yield(aut.Result()) {
+				return
+			}
 		}
-	}
 
-	for {
-		isDone := f.Call(arg)
-		if isDone {
-			break
+		if aut.HasError() {
+			panic(aut.GetError())
 		}
-	}
 
-	res := f.Result()
-	return res, ERROR(f)
+		_ = yield(aut.Result())
+	}
 }
 
 func IsEmpty(ll any) bool {
